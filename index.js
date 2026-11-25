@@ -7,6 +7,7 @@ export class DouyinChat {
   #timeout
   #receiptTimeout
   #queue = Promise.resolve()
+  #ready = false
 
   constructor({ page, accountSelector, pickerSelector, timeout = 10_000, receiptTimeout = Math.max(timeout, 20_000) }) {
     if (!page || !accountSelector || !pickerSelector || !Number.isFinite(timeout) || timeout <= 0 || !Number.isFinite(receiptTimeout) || receiptTimeout <= 0) {
@@ -31,6 +32,7 @@ export class DouyinChat {
         target = await this.#prepare(conversation, activeConversation, sticker)
       } catch (error) {
         // 尚未点击贴纸，页面或会话加载超时可以安全重开一次。
+        this.#ready = false
         if (error.name !== 'TimeoutError') throw error
         target = await this.#prepare(conversation, activeConversation, sticker)
       }
@@ -53,6 +55,7 @@ export class DouyinChat {
           this.#verifyUrl()
           return { confirmed: true }
         } catch (cause) {
+          this.#ready = false
           throw new Error('发送结果未知，请先查看官方聊天记录再决定是否重试', { cause })
         }
       } finally {
@@ -64,18 +67,26 @@ export class DouyinChat {
   }
 
   async #prepare(conversation, activeConversation, sticker) {
-    await this.#page.goto(CHAT_URL, { waitUntil: 'domcontentloaded', timeout: this.#timeout })
+    if (!this.#ready || !this.#isChatPage()) {
+      this.#ready = false
+      await this.#page.goto(CHAT_URL, { waitUntil: 'domcontentloaded', timeout: this.#timeout })
+    }
     this.#verifyUrl()
     await this.#verify(this.#accountSelector)
+    this.#ready = true
     await this.#click(conversation)
     await this.#verify(activeConversation)
     await this.#click(this.#pickerSelector)
     return this.#find(sticker)
   }
 
-  #verifyUrl() {
+  #isChatPage() {
     const { origin, pathname } = new URL(this.#page.url())
-    if (origin !== 'https://www.douyin.com' || !/^\/chat\/?$/.test(pathname)) {
+    return origin === 'https://www.douyin.com' && /^\/chat\/?$/.test(pathname)
+  }
+
+  #verifyUrl() {
+    if (!this.#isChatPage()) {
       throw new Error('当前页面不是抖音官方聊天页')
     }
   }

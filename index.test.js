@@ -9,8 +9,9 @@ const request = {
 
 function setup({ ambiguous, noReceipt, timeoutOnce } = {}) {
   const clicks = []
+  const visits = []
   const page = {
-    async goto() {},
+    async goto(url) { visits.push(url) },
     url: () => 'https://www.douyin.com/chat',
     async waitForSelector(selector) {
       if (selector === timeoutOnce) {
@@ -31,7 +32,7 @@ function setup({ ambiguous, noReceipt, timeoutOnce } = {}) {
     },
   }
   return {
-    clicks, chat: new DouyinChat({ page, accountSelector: '#account', pickerSelector: '#picker' }),
+    visits, clicks, chat: new DouyinChat({ page, accountSelector: '#account', pickerSelector: '#picker' }),
   }
 }
 
@@ -58,4 +59,15 @@ test('reopens chat once after a pre-send selector timeout', async () => {
   const { chat, clicks } = setup({ timeoutOnce: '#target' })
   assert.deepEqual(await chat.sendSticker(request), { confirmed: true })
   assert.deepEqual(clicks, ['#target', '#picker', '#spark'])
+})
+
+
+test('reuses one chat page for a batch and switches conversations in order', async () => {
+  const { chat, clicks, visits } = setup()
+  await Promise.all([
+    chat.sendSticker(request),
+    chat.sendSticker({ ...request, conversation: '#other' }),
+  ])
+  assert.equal(visits.length, 1)
+  assert.deepEqual(clicks, ['#target', '#picker', '#spark', '#other', '#picker', '#spark'])
 })
