@@ -40,11 +40,22 @@ export class DouyinChat {
         await this.#verify(this.#accountSelector)
         await this.#verify(activeConversation)
         this.#verifyUrl()
-        const before = await page.$$eval(outgoingSticker, nodes => nodes.length)
+        const before = await page.$$eval(outgoingSticker, nodes => ({
+          count: nodes.length,
+          ids: nodes.map(node => node.closest('[data-message-id]')?.getAttribute('data-message-id')).filter(Boolean),
+        }))
         try {
           await target.click()
           const receipt = await page.waitForFunction(
-            (selector, count) => document.querySelectorAll(selector).length > count,
+            (selector, previous) => {
+              const nodes = Array.from(document.querySelectorAll(selector))
+              if (nodes.length > previous.count) return true
+              // 虚拟列表可能在追加一条消息时移除最老的一条。
+              const ids = nodes.map(node => node.closest('[data-message-id]')?.getAttribute('data-message-id'))
+              const anchor = ids.indexOf(previous.ids.at(-1))
+              return previous.ids.length > 0 && anchor >= 0 &&
+                ids.slice(anchor + 1).some(id => id && !previous.ids.includes(id))
+            },
             { timeout: this.#receiptTimeout },
             outgoingSticker,
             before,

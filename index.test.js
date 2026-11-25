@@ -7,7 +7,7 @@ const request = {
   sticker: '#spark', outgoingSticker: '#sent',
 }
 
-function setup({ ambiguous, noReceipt, timeoutOnce } = {}) {
+function setup({ ambiguous, noReceipt, timeoutOnce, rotate } = {}) {
   const clicks = []
   const visits = []
   const page = {
@@ -21,12 +21,22 @@ function setup({ ambiguous, noReceipt, timeoutOnce } = {}) {
       return { async click() { clicks.push(selector) }, async dispose() {} }
     },
     async $$eval(selector, count) {
-      return count(Array.from({ length: selector === ambiguous ? 2 : 1 }))
+      const ids = selector === '#sent' && rotate ? ['old', 'anchor'] : ['anchor']
+      const nodes = ids.map(id => ({ closest: () => ({ getAttribute: () => id }) }))
+      return count(selector === ambiguous ? [...nodes, ...nodes] : nodes)
     },
     async waitForFunction(_predicate, options, selector, before) {
       assert.equal(options.timeout, 20_000)
       assert.equal(selector, '#sent')
-      assert.equal(before, 1)
+      const ids = ['anchor', 'new']
+      const original = globalThis.document
+      try {
+        globalThis.document = { querySelectorAll: () => ids.map(id => ({ closest: () => ({ getAttribute: () => id }) })) }
+        assert.equal(_predicate(selector, before), true)
+      } finally {
+        if (original === undefined) delete globalThis.document
+        else globalThis.document = original
+      }
       if (noReceipt) throw new Error('timeout')
       return { async dispose() {} }
     },
@@ -70,4 +80,9 @@ test('reuses one chat page for a batch and switches conversations in order', asy
   ])
   assert.equal(visits.length, 1)
   assert.deepEqual(clicks, ['#target', '#picker', '#spark', '#other', '#picker', '#spark'])
+})
+
+test('recognizes a new outgoing sticker when the rendered count stays fixed', async () => {
+  const { chat } = setup({ rotate: true })
+  assert.deepEqual(await chat.sendSticker(request), { confirmed: true })
 })
