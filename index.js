@@ -5,16 +5,18 @@ export class DouyinChat {
   #accountSelector
   #pickerSelector
   #timeout
+  #receiptTimeout
   #queue = Promise.resolve()
 
-  constructor({ page, accountSelector, pickerSelector, timeout = 10_000 }) {
-    if (!page || !accountSelector || !pickerSelector || !Number.isFinite(timeout) || timeout <= 0) {
+  constructor({ page, accountSelector, pickerSelector, timeout = 10_000, receiptTimeout = Math.max(timeout, 20_000) }) {
+    if (!page || !accountSelector || !pickerSelector || !Number.isFinite(timeout) || timeout <= 0 || !Number.isFinite(receiptTimeout) || receiptTimeout <= 0) {
       throw new TypeError('需要 Puppeteer Page、账号选择器、贴纸面板选择器和有效超时')
     }
     this.#page = page
     this.#accountSelector = accountSelector
     this.#pickerSelector = pickerSelector
     this.#timeout = timeout
+    this.#receiptTimeout = receiptTimeout
   }
 
   sendSticker({ conversation, activeConversation, sticker, outgoingSticker }) {
@@ -24,13 +26,14 @@ export class DouyinChat {
 
     const send = this.#queue.then(async () => {
       const page = this.#page
-      await page.goto(CHAT_URL, { waitUntil: 'domcontentloaded', timeout: this.#timeout })
-      this.#verifyUrl()
-      await this.#verify(this.#accountSelector)
-      await this.#click(conversation)
-      await this.#verify(activeConversation)
-      await this.#click(this.#pickerSelector)
-      const target = await this.#find(sticker)
+      let target
+      try {
+        target = await this.#prepare(conversation, activeConversation, sticker)
+      } catch (error) {
+        // 尚未点击贴纸，页面或会话加载超时可以安全重开一次。
+        if (error.name !== 'TimeoutError') throw error
+        target = await this.#prepare(conversation, activeConversation, sticker)
+      }
       try {
         await this.#verify(this.#accountSelector)
         await this.#verify(activeConversation)
@@ -40,11 +43,12 @@ export class DouyinChat {
           await target.click()
           const receipt = await page.waitForFunction(
             (selector, count) => document.querySelectorAll(selector).length > count,
-            { timeout: this.#timeout },
+            { timeout: this.#receiptTimeout },
             outgoingSticker,
             before,
           )
           await receipt.dispose()
+          await this.#verify(this.#accountSelector)
           await this.#verify(activeConversation)
           this.#verifyUrl()
           return { confirmed: true }
@@ -57,6 +61,16 @@ export class DouyinChat {
     })
     this.#queue = send.catch(() => {})
     return send
+  }
+
+  async #prepare(conversation, activeConversation, sticker) {
+    await this.#page.goto(CHAT_URL, { waitUntil: 'domcontentloaded', timeout: this.#timeout })
+    this.#verifyUrl()
+    await this.#verify(this.#accountSelector)
+    await this.#click(conversation)
+    await this.#verify(activeConversation)
+    await this.#click(this.#pickerSelector)
+    return this.#find(sticker)
   }
 
   #verifyUrl() {

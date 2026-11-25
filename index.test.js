@@ -7,18 +7,23 @@ const request = {
   sticker: '#spark', outgoingSticker: '#sent',
 }
 
-function setup({ ambiguous, noReceipt } = {}) {
+function setup({ ambiguous, noReceipt, timeoutOnce } = {}) {
   const clicks = []
   const page = {
     async goto() {},
     url: () => 'https://www.douyin.com/chat',
     async waitForSelector(selector) {
+      if (selector === timeoutOnce) {
+        timeoutOnce = undefined
+        throw Object.assign(new Error('selector timeout'), { name: 'TimeoutError' })
+      }
       return { async click() { clicks.push(selector) }, async dispose() {} }
     },
     async $$eval(selector, count) {
       return count(Array.from({ length: selector === ambiguous ? 2 : 1 }))
     },
-    async waitForFunction(_predicate, _options, selector, before) {
+    async waitForFunction(_predicate, options, selector, before) {
+      assert.equal(options.timeout, 20_000)
       assert.equal(selector, '#sent')
       assert.equal(before, 1)
       if (noReceipt) throw new Error('timeout')
@@ -46,4 +51,11 @@ test('reports an unknown result without retrying when no receipt appears', async
   const { chat, clicks } = setup({ noReceipt: true })
   await assert.rejects(chat.sendSticker(request), /发送结果未知/)
   assert.equal(clicks.filter(click => click === '#spark').length, 1)
+})
+
+
+test('reopens chat once after a pre-send selector timeout', async () => {
+  const { chat, clicks } = setup({ timeoutOnce: '#target' })
+  assert.deepEqual(await chat.sendSticker(request), { confirmed: true })
+  assert.deepEqual(clicks, ['#target', '#picker', '#spark'])
 })
